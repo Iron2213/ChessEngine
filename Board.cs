@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace ChessEngine {
 	public class Board {
@@ -23,6 +24,10 @@ namespace ChessEngine {
 
 		public List<Tile> OpponentControlledSquares { get; } = new List<Tile>();
 
+		public (bool isWhite, Move move, Piece removedPiece, bool canKS, bool canQS) CachedMove { get; set; }
+
+		public Stack<Move> MoveHistory { get; set; } = new Stack<Move>();
+
 		public Board() {
 			Tiles = new Tile[8, 8];
 			for (int x = 0; x < 8; x++) {
@@ -39,9 +44,7 @@ namespace ChessEngine {
 			return Tiles[position.Row, position.Column];
 		}
 
-		public void PrintPosition() {
-
-			Console.Clear();
+		public void PrintPosition(bool PrintControlledSquares = false) {
 			Console.WriteLine("§ Current position on the board §");
 			Console.WriteLine("╔═══╦═══╦═══╦═══╦═══╦═══╦═══╦═══╗");
 			Console.Write("║");
@@ -66,7 +69,7 @@ namespace ChessEngine {
 					}
 					else {
 
-						if (OpponentControlledSquares.Contains(tile)) {
+						if (OpponentControlledSquares.Contains(tile) && PrintControlledSquares) {
 							Console.Write(" ! ");
 						}
 						else
@@ -178,15 +181,17 @@ namespace ChessEngine {
 				EnPassantTargetIndex = Utility.IndexFromAN(FENFields[3]);
 			}
 
-			//
-			// Field 5: Halfmove clock
-			//
-			HalfmoveClock = int.Parse(FENFields[4]);
+			if (FENFields.Length > 4) {
+				//
+				// Field 5: Halfmove clock
+				//
+				HalfmoveClock = int.Parse(FENFields[4]);
 
-			//
-			// Field 6: Fullmove number
-			//
-			FullmoveNumber = int.Parse(FENFields[5]);
+				//
+				// Field 6: Fullmove number
+				//
+				FullmoveNumber = int.Parse(FENFields[5]);
+			}
 		}
 
 		public void MovePiece(Tile currentTile, Tile targetTile) {
@@ -200,71 +205,156 @@ namespace ChessEngine {
 
 			Tile currentTile = TileAt(move.CurrentPosition);
 			Tile targetTile = TileAt(move.TargetPosition);
-
 			var piece = currentTile.Piece;
-			currentTile.Piece = null;
 
-			piece.Position = currentTile.Position;
+			CachedMove = (piece.IsWhite, move, targetTile.Piece, piece.IsWhite ? WhiteKSCastle : BlackKSCastle, piece.IsWhite ? WhiteQSCastle : BlackQSCastle);
 
-			if (move.Type == MoveType.Capture) {
-				var opponentPieces = piece.IsWhite ? BlackPieces : WhitePieces;
+			var opponentPieces = piece.IsWhite ? BlackPieces : WhitePieces;
 
-				opponentPieces.Remove(targetTile.Piece);
+			MovePiece(currentTile, targetTile);
 
-				if (targetTile.Piece.Type == PieceType.Rook) {
-					if (targetTile.Piece.IsWhite) {
-						if (targetTile.Piece.Position.Equals(new Point(7, 0))) {
+			switch (move.Type) {
+				case MoveType.Capture: {
+						opponentPieces.Remove(targetTile.Piece);
+
+						if (targetTile.Piece.Type == PieceType.Rook) {
+							if (targetTile.Piece.IsWhite) {
+								if (targetTile.Piece.Position.Equals(new Point(7, 0))) {
+									WhiteQSCastle = false;
+								}
+								else if (targetTile.Piece.Position.Equals(new Point(7, 7))) {
+									WhiteKSCastle = false;
+								}
+							}
+							else {
+								if (targetTile.Piece.Position.Equals(new Point(0, 7))) {
+									BlackQSCastle = false;
+								}
+								else if (targetTile.Piece.Position.Equals(new Point(0, 7))) {
+									BlackKSCastle = false;
+								}
+							}
+						}
+					}
+					break;
+
+				case MoveType.KSCastle: {
+						var rookPosition = targetTile.Position + Engine.DirectionOffsets[Direction.Est];
+
+						var rookTargetTile = TileAt(targetTile.Position + Engine.DirectionOffsets[Direction.West]);
+
+						MovePiece(TileAt(rookPosition), rookTargetTile);
+
+						if (piece.IsWhite) {
+							WhiteKSCastle = false;
 							WhiteQSCastle = false;
 						}
-
-						if (targetTile.Piece.Position.Equals(new Point(7, 7))) {
-							WhiteKSCastle = false;
-						}
-					}
-					else {
-						if (targetTile.Piece.Position.Equals(new Point(0, 7))) {
+						else {
+							BlackKSCastle = false;
 							BlackQSCastle = false;
 						}
+					}
+					break;
 
-						if (targetTile.Piece.Position.Equals(new Point(0, 7))) {
+				case MoveType.QSCastle: {
+						var rookPosition = targetTile.Position + (Engine.DirectionOffsets[Direction.West] * 2);
+
+						var rookTargetTile = TileAt(targetTile.Position + Engine.DirectionOffsets[Direction.Est]);
+
+						MovePiece(TileAt(rookPosition), rookTargetTile);
+
+						if (piece.IsWhite) {
+							WhiteKSCastle = false;
+							WhiteQSCastle = false;
+						}
+						else {
 							BlackKSCastle = false;
+							BlackQSCastle = false;
 						}
 					}
-				}
-			}
-			else if (move.Type == MoveType.EnPassant) {
+					break;
 
-			}
+				case MoveType.EnPassant: {
+						var enPassantTarget = move.TargetPosition + (piece.IsWhite ? Engine.DirectionOffsets[Direction.South] : Engine.DirectionOffsets[Direction.North]);
+						var opponetsPawnTile = TileAt(enPassantTarget);
+						var opponetsPawn = opponetsPawnTile.Piece;
 
-			if (move.PieceMoving == PieceType.King) {
+						opponetsPawnTile.Piece = null;
 
-				if (move.Type == MoveType.KSCastle) {
-					var rookPosition = targetTile.Position + Engine.DirectionOffsets[Direction.Est];
-
-					var rookTargetTile = TileAt(targetTile.Position + Engine.DirectionOffsets[Direction.West]);
-
-					MovePiece(TileAt(rookPosition), rookTargetTile);
-				}
-				else if (move.Type == MoveType.QSCastle) {
-					var rookPosition = targetTile.Position + (Engine.DirectionOffsets[Direction.West] * 2);
-
-					var rookTargetTile = TileAt(targetTile.Position + Engine.DirectionOffsets[Direction.Est]);
-
-					MovePiece(TileAt(rookPosition), rookTargetTile);
-				}
-
-				if (piece.IsWhite) {
-					WhiteKSCastle = false;
-					WhiteQSCastle = false;
-				}
-				else {
-					BlackKSCastle = false;
-					BlackQSCastle = false;
-				}
+						opponentPieces.Remove(opponetsPawn);
+					}
+					break;
 			}
 
-			targetTile.Piece = piece;
 			EnPassantTargetIndex = Point.Default;
+
+			MoveHistory.Push(move);
+		}
+
+		public void UnmakeMove() {
+
+			if (MoveHistory.Count == 19)
+				_ = 1;
+
+			if (MoveHistory.Count > 0) {
+
+				WhiteToMove = !WhiteToMove;
+
+				if (CachedMove.removedPiece != null) {
+					var pieces = CachedMove.removedPiece.IsWhite ? WhitePieces : BlackPieces;
+
+					pieces.Add(CachedMove.removedPiece);
+				}
+
+				Tile previousTile = TileAt(CachedMove.move.CurrentPosition);
+				Tile newTile = TileAt(CachedMove.move.TargetPosition);
+
+				previousTile.Piece = newTile.Piece;
+				newTile.Piece = CachedMove.removedPiece;
+
+				switch (CachedMove.move.Type) {
+					case MoveType.KSCastle: {
+							var rookOldPosition = CachedMove.move.TargetPosition + Engine.DirectionOffsets[Direction.Est];
+
+							var rookCurrentTile = TileAt(CachedMove.move.TargetPosition + Engine.DirectionOffsets[Direction.West]);
+
+							MovePiece(rookCurrentTile, TileAt(rookOldPosition));
+
+							if (CachedMove.isWhite) {
+								WhiteKSCastle = CachedMove.canKS;
+								WhiteQSCastle = CachedMove.canQS;
+							}
+							else {
+								BlackKSCastle = CachedMove.canKS;
+								BlackQSCastle = CachedMove.canQS;
+							}
+						}
+
+						break;
+
+					case MoveType.QSCastle: {
+							var rookOldPosition = CachedMove.move.TargetPosition + (Engine.DirectionOffsets[Direction.West] * 2);
+
+							var rookCurrentTile = TileAt(CachedMove.move.TargetPosition + Engine.DirectionOffsets[Direction.Est]);
+
+							MovePiece(rookCurrentTile, TileAt(rookOldPosition));
+
+							if (CachedMove.isWhite) {
+								WhiteKSCastle = CachedMove.canKS;
+								WhiteQSCastle = CachedMove.canQS;
+							}
+							else {
+								BlackKSCastle = CachedMove.canKS;
+								BlackQSCastle = CachedMove.canQS;
+							}
+						}
+						break;
+
+					case MoveType.EnPassant:
+						TileAt(CachedMove.removedPiece.Position).Piece = CachedMove.removedPiece;
+						break;
+				}
+			}
 		}
 	}
 }

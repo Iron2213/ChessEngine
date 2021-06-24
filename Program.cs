@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 
 namespace ChessEngine {
@@ -63,6 +62,10 @@ namespace ChessEngine {
 				Point p = (Point)obj;
 				return (Row == p.Row) && (Column == p.Column);
 			}
+		}
+
+		public override int GetHashCode() {
+			return Row.GetHashCode() ^ Column.GetHashCode();
 		}
 	}
 
@@ -139,11 +142,50 @@ namespace ChessEngine {
 			DirectionOffsets.Add(Direction.SouthWest, new Point(1, -1));
 			DirectionOffsets.Add(Direction.SouthEst, new Point(1, 1));
 
-			Board.SetStartingPos("8/8/8/4b3/8/8/8/R3K2R w KQ - 0 1");
+			// Board.SetStartingPos("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -");
+
+			Board.SetStartingPos();
 
 			var moves = GeneratePseudoLegalMoves();
+			//List<Move> moves = null;
+			//Random random = new Random();
+			//Console.WriteLine("§ Played moves §");
+			//for (int i = 0; i < 16; i++) {
+			//	moves = GeneratePseudoLegalMoves();
+			//	int index = random.Next(0, moves.Count);
+
+			//	var move = moves[index];
+			//	Board.MakeMove(move);
+
+			//	Console.Write(move.PieceMoving + ": ");
+			//	Console.Write(Utility.GetPositionNotation(move.CurrentPosition));
+			//	Console.Write(" -> ");
+
+			//	string moveText = move.Type switch {
+			//		MoveType.Capture => "x" + Utility.GetPositionNotation(move.TargetPosition),
+			//		MoveType.KSCastle => "O-O",
+			//		MoveType.QSCastle => "O-O-O",
+			//		_ => Utility.GetPositionNotation(move.TargetPosition),
+			//	};
+
+			//	Console.WriteLine(moveText);
+
+			//	Console.WriteLine();
+			//	Board.PrintPosition();
+			//	Console.WriteLine();
+			//}
+
+			//Board.UnmakeMove();
 
 			Board.PrintPosition();
+
+			try {
+				Console.WriteLine("Result: " + Perft(2));
+			}
+			catch (Exception) {
+				Board.PrintPosition();
+			}
+			
 
 
 			//Random random = new Random();
@@ -160,30 +202,70 @@ namespace ChessEngine {
 			//	Board.PrintPosition();
 			//}
 
+			//Board.PrintPosition();
 
-			Console.WriteLine();
-			Console.WriteLine("§ Pseudo-legal moves §");
-			foreach (var move in moves) {
-				Console.Write(move.PieceMoving + ": ");
-				Console.Write(Utility.GetPositionNotation(move.CurrentPosition));
-				Console.Write(" -> ");
 
-				string moveText = move.Type switch {
-					MoveType.Capture => "x" + Utility.GetPositionNotation(move.TargetPosition),
-					MoveType.KSCastle => "O-O",
-					MoveType.QSCastle => "O-O-O",
-					_ => Utility.GetPositionNotation(move.TargetPosition),
-				};
 
-				Console.WriteLine(moveText);
-			}
+			//Board.MakeMove(moves.Find(i => i.Type == MoveType.QSCastle));
+
+			//Board.PrintPosition();
+
+			//Board.UnmakeMove();
+
+			//Board.PrintPosition();
+
+			//moves = GeneratePseudoLegalMoves();
 
 			//Console.WriteLine();
-			//Console.WriteLine("§ Square controlled by white §");
-			//foreach (var item in Board.OpponentControlledSquares) {
-			//	Console.WriteLine(item.GetPositionNotation());
+			//Console.WriteLine("§ Pseudo-legal moves §");
+			//foreach (var move in moves) {
+			//	Console.Write(move.PieceMoving + ": ");
+			//	Console.Write(Utility.GetPositionNotation(move.CurrentPosition));
+			//	Console.Write(" -> ");
+
+			//	string moveText = move.Type switch {
+			//		MoveType.Capture => "x" + Utility.GetPositionNotation(move.TargetPosition),
+			//		MoveType.KSCastle => "O-O",
+			//		MoveType.QSCastle => "O-O-O",
+			//		_ => Utility.GetPositionNotation(move.TargetPosition),
+			//	};
+
+			//	Console.WriteLine(moveText);
 			//}
 		}
+
+
+
+		public ulong Perft(int depth) {
+
+			if (depth == 0)
+				return 1;
+
+			var moves = GeneratePseudoLegalMoves();
+			ulong nodes = 0;
+
+			for (int i = 0; i < moves.Count; i++) {
+
+				Board.MakeMove(moves[i]);
+
+				if (!IsInCheck(Board.WhiteToMove)) {
+					nodes += Perft(depth - 1);
+				}
+
+				Board.PrintPosition();
+				Board.UnmakeMove();
+
+			}
+
+			return nodes;
+		}
+
+
+
+
+
+
+
 
 		public List<Move> GeneratePseudoLegalMoves() {
 			List<Move> moves = new List<Move>();
@@ -236,6 +318,9 @@ namespace ChessEngine {
 				: position.Row == 1;
 
 			Point newPosition = position + movementOffset;
+
+			if (position.Row == 6 && position.Column == 0)
+				_ = 1;
 
 			if (Move.IsInsideBounds(newPosition)) {
 
@@ -470,14 +555,15 @@ namespace ChessEngine {
 		public List<Move> GetKingMoves(Piece piece, Point position) {
 			List<Move> kingMoves = new List<Move>();
 
+			Point targetPosition;
 			foreach (var offset in DirectionOffsets) {
 
-				Point targetPosition = position + offset.Value;
+				targetPosition = position + offset.Value;
 
 				if (Move.IsInsideBounds(targetPosition)) {
 					Tile targetTile = Board.TileAt(targetPosition);
 
-					if (targetTile.CanMoveTo(piece)) {
+					if (targetTile.CanMoveTo(piece) && !Board.OpponentControlledSquares.Contains(targetTile)) {
 						kingMoves.Add(new Move() {
 							Type = targetTile.CanTake(piece.IsWhite) ? MoveType.Capture : MoveType.Movement,
 							PieceMoving = piece.Type,
@@ -489,9 +575,6 @@ namespace ChessEngine {
 			}
 
 			if (piece.IsWhite) {
-
-				Point targetPosition;
-
 				if (Board.WhiteKSCastle) {
 
 					for (int i = 1; i <= 2; i++) {
@@ -507,6 +590,9 @@ namespace ChessEngine {
 									CurrentPosition = position,
 									TargetPosition = targetPosition
 								});
+						}
+						else {
+							break;
 						}
 					}
 				}
@@ -526,12 +612,13 @@ namespace ChessEngine {
 									TargetPosition = targetPosition + DirectionOffsets[Direction.Est]
 								});
 						}
+						else {
+							break;
+						}
 					}
 				}
 			}
 			else {
-				Point targetPosition;
-
 				if (Board.BlackKSCastle) {
 
 					for (int i = 1; i <= 2; i++) {
@@ -547,6 +634,9 @@ namespace ChessEngine {
 									CurrentPosition = position,
 									TargetPosition = targetPosition,
 								});
+						}
+						else {
+							break;
 						}
 					}
 				}
@@ -565,6 +655,9 @@ namespace ChessEngine {
 									CurrentPosition = position,
 									TargetPosition = targetPosition + DirectionOffsets[Direction.Est]
 								});
+						}
+						else {
+							break;
 						}
 					}
 				}
@@ -728,6 +821,36 @@ namespace ChessEngine {
 				}
 
 			}
+		}
+
+		public bool IsInCheck(bool whiteToMove) {
+			var opponentsPieces = whiteToMove ? Board.BlackPieces : Board.WhitePieces;
+
+			var king = opponentsPieces.Find(i => i.Type == PieceType.King);
+
+			foreach (var item in DirectionOffsets) {
+				for (int i = 1; i <= 8; i++) {
+					var targetPosition = king.Position + (item.Value * i);
+					if (Move.IsInsideBounds(targetPosition)) {
+
+						Tile targetTile = Board.TileAt(targetPosition);
+
+						if (targetTile.HasPiece()) {
+							if (targetTile.CanTake(king.IsWhite)) {
+								return true;
+							}
+							else {
+								break;
+							}
+						}
+					}
+					else {
+						break;
+					}
+				}
+			}
+
+			return false;
 		}
 	}
 }
